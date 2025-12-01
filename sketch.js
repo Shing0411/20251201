@@ -8,7 +8,7 @@ let jumpAnim = { img: null, frames: 6, path: '跳/33.png', w: 0, h: 0 };
 let danceAnim = { img: null, frames: 6, path: '舞/55.png', w: 0, h: 0 };
 // 4. 跑 (循環)
 let runAnim = { img: null, frames: 4, path: '跑/22.png', w: 0, h: 0 };
-// 5. 打 (先播完一次，按住則鎖定在最後一張)
+// 5. 打 (攻擊)
 let attackAnim = { img: null, frames: 4, path: '打/77.png', w: 0, h: 0 };
 // 6. 特效 (循環)
 let effectAnim = { img: null, frames: 5, path: '特效/11.png', w: 0, h: 0 };
@@ -19,10 +19,16 @@ let charX, charY;
 let facing = 1;            // 1 為右，-1 為左
 let moveSpeed = 5;         
 
+// --- ★★★ 新增：物理模擬變數 ★★★ ---
+let groundY;       // 地板的高度 (角色原本站的位置)
+let vy = 0;        // 垂直速度 (Velocity Y)
+let gravity = 1.5; // 重力 (數字越大掉越快)
+let jumpPower = -25; // 跳躍力道 (負數代表往上)
+
 // --- 動畫與特效管理 ---
 let animTimer = 0; 
-let speed = 15;       // 一般動畫速度 (數字越大越慢)
-let attackSpeed = 5;  // ★★★ 打鬥動畫速度 (數字越小越快，設為 5 會很有打擊感) ★★★
+let speed = 15;       
+let attackSpeed = 5;  
 let projectiles = []; 
 let shootCooldown = 0; 
 
@@ -52,8 +58,10 @@ function setup() {
   effectAnim.w = effectAnim.img.width / effectAnim.frames;
   effectAnim.h = effectAnim.img.height;
   
+  // 設定地板位置在螢幕正中間
+  groundY = height / 2;
   charX = width / 2;
-  charY = height / 2;
+  charY = groundY;
   
   noSmooth();
   imageMode(CENTER); 
@@ -63,7 +71,29 @@ function draw() {
   background('#bde0fe');
 
   // ==========================
-  // Part 1: 角色邏輯
+  // Part 1: 物理模擬 (Physics)
+  // ==========================
+  
+  // 1. 套用重力 (只要在空中，就會越來越快往下掉)
+  if (charY < groundY || vy < 0) {
+    vy += gravity;   // 速度增加重力
+    charY += vy;     // 更新位置
+  }
+
+  // 2. 地板碰撞偵測 (落地)
+  if (charY >= groundY) {
+    charY = groundY; // 強制校正回地板位置
+    vy = 0;          // 垂直速度歸零
+
+    // 如果原本是跳躍狀態，落地瞬間變回平常
+    if (currentState === 'jumping') {
+      currentState = 'idle';
+      animTimer = 0; // 重置動畫
+    }
+  }
+
+  // ==========================
+  // Part 2: 角色狀態邏輯
   // ==========================
 
   let isLockedAction = (currentState === 'jumping' || currentState === 'dancing' || currentState === 'attacking');
@@ -90,7 +120,7 @@ function draw() {
     }
   }
 
-  // 邊界限制
+  // 邊界限制 (X軸)
   let safeMargin = runAnim.w / 2;
   charX = constrain(charX, safeMargin, width - safeMargin);
 
@@ -102,31 +132,28 @@ function draw() {
   else if (currentState === 'attacking') currentAnimData = attackAnim;
   else currentAnimData = idleAnim;
 
-  // --- ★★★ 關鍵修改：決定目前的速度 ★★★ ---
+  // 動畫計時
   animTimer++;
-  
-  let currentSpeed = speed; // 預設使用一般速度 (15)
-  if (currentState === 'attacking') {
-    currentSpeed = attackSpeed; // 如果是打鬥，使用打鬥速度 (5)
-  }
-  
+  let currentSpeed = (currentState === 'attacking') ? attackSpeed : speed;
   let rawFrameIndex = floor(animTimer / currentSpeed);
 
-  // 攻擊狀態結束邏輯
+  // --- 狀態結束檢查 ---
+  
+  // A. 攻擊 (Attack) 的結束檢查
   if (currentState === 'attacking') {
     if (rawFrameIndex >= currentAnimData.frames) {
       if (keyIsDown(32)) {
-        // 按住不放：維持狀態
+         // 按住空白鍵：保持攻擊狀態 (鎖定姿勢)
       } else {
-        // 放開：回到平常
-        currentState = 'idle';
-        animTimer = 0;
-        currentAnimData = idleAnim;
-        rawFrameIndex = 0;
+         currentState = 'idle';
+         animTimer = 0;
+         currentAnimData = idleAnim;
+         rawFrameIndex = 0;
       }
     }
   } 
-  else if (currentState === 'jumping' || currentState === 'dancing') {
+  // B. 跳舞 (Dance) 的結束檢查 (跳躍已經交給物理引擎判斷，這裡只需判斷跳舞)
+  else if (currentState === 'dancing') {
     if (rawFrameIndex >= currentAnimData.frames) {
       currentState = 'idle';
       animTimer = 0;
@@ -134,24 +161,32 @@ function draw() {
       rawFrameIndex = 0;
     }
   }
+  // C. 跳躍 (Jump) 不需要檢查動畫幀數，因為它是靠「落地」來結束的
 
-  // 計算顯示影格
+  // --- 計算顯示影格 ---
   let displayFrame;
+  
   if (currentState === 'attacking') {
+    // 攻擊：鎖定在最後一張
     displayFrame = min(rawFrameIndex, currentAnimData.frames - 1);
-  } else {
+  } 
+  else if (currentState === 'jumping') {
+    // ★★★ 跳躍修正 ★★★
+    // 因為在空中的時間可能比動畫長，我們讓它播到最後一張就停住(像飛翔姿勢)，而不是循環
+    displayFrame = min(rawFrameIndex, currentAnimData.frames - 1);
+  }
+  else {
+    // 其他：循環播放
     displayFrame = rawFrameIndex % currentAnimData.frames;
   }
 
-  // --- 特效發射邏輯 (偵測影格) ---
+  // --- 特效發射邏輯 ---
   if (currentState === 'attacking' && displayFrame === 3) {
      if (shootCooldown <= 0) {
         spawnProjectile();
-        // 設定冷卻時間 (配合打鬥速度，設短一點讓連發更爽快)
         shootCooldown = 10; 
      }
   }
-  // 減少冷卻時間
   if (shootCooldown > 0) shootCooldown--;
 
 
@@ -169,13 +204,13 @@ function draw() {
   pop(); 
 
   // ==========================
-  // Part 2: 特效邏輯
+  // Part 3: 特效邏輯
   // ==========================
   
   for (let i = projectiles.length - 1; i >= 0; i--) {
     let p = projectiles[i];
     p.x += p.speed;
-    let pFrame = floor(frameCount / 5) % effectAnim.frames; // 特效本身的速度
+    let pFrame = floor(frameCount / 5) % effectAnim.frames;
 
     push();
       translate(p.x, p.y);
@@ -208,12 +243,17 @@ function spawnProjectile() {
 
 // --- 按鍵事件 ---
 function keyPressed() {
+  // 檢查是否處於「不可打斷」的動作中
+  // 注意：現在跳躍中也可以按空白鍵(空中攻擊)嗎？如果不行的話就維持原樣
   let isActionActive = (currentState === 'jumping' || currentState === 'dancing' || currentState === 'attacking');
   
-  if (!isActionActive) {
+  // 允許在平常或跑步時跳躍，或是在跳舞時無法跳躍
+  // 這裡特別放寬：如果只是 'running' or 'idle' 就可以跳
+  if (currentState === 'idle' || currentState === 'running') {
     if (keyCode === UP_ARROW) {
       currentState = 'jumping';
       animTimer = 0;
+      vy = jumpPower; // ★★★ 給予向上速度 (發射！) ★★★
     } else if (keyCode === DOWN_ARROW) {
       currentState = 'dancing';
       animTimer = 0;
@@ -228,6 +268,8 @@ function keyPressed() {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  groundY = height / 2; // 視窗改變大小時，重新計算地板位置
+  charY = groundY;      // 讓角色回到地板
   let safeMargin = runAnim.w / 2;
   charX = constrain(charX, safeMargin, width - safeMargin);
 }
