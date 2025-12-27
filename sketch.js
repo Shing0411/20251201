@@ -469,4 +469,5 @@ function keyPressed() {
   }
 }
 
+
 function windowResized() { createCanvas(windowWidth, windowHeight); updateGlobalScale(); if (gameState === 'start') { styleDomElement(nameInput, width/2 - 100, height/2, 200, 30); styleDomElement(startButton, width/2 - 50, height/2 + 50, 100, 40); } updateAllAnimSizes(); groundY = height * 0.8; charY = groundY - (idleAnim.destH / 2); escapeDoorX = width - 60; if (npcs.length > 0) { npcs[0].x = width * 0.15; npcs[0].updateSize(groundY); npcs[1].x = width * 0.45; npcs[1].updateSize(groundY); npcs[2].x = width * 0.75; npcs[2].updateSize(groundY); } }
